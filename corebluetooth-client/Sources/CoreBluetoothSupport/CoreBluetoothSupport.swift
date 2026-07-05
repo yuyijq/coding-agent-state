@@ -13,7 +13,7 @@ public enum BLEDefaults {
     public static let cachePath = "~/.ble_device_cache.json"
     public static let connectRetries = 3
     public static let clientTimeout = 3.0
-    public static let retryDelay = 1.2
+    public static let retryDelay = 0.5
     public static let scanTimeout = 12.0
     public static let scanRounds = 3
     public static let timeSyncIntervalSeconds: Int64 = 3600
@@ -99,10 +99,26 @@ public func writeCharacteristicUUIDOrder(
     return [targetCharacteristicUUID]
 }
 
+public func characteristicUUIDsToDiscover(
+    targetCharacteristicUUID: String?,
+    lastTimeSyncUnixSeconds: Int64?,
+    nowUnixSeconds: Int64
+) -> [String] {
+    guard let targetCharacteristicUUID else {
+        return BLEDefaults.writableCharacteristicUUIDs
+    }
+
+    return writeCharacteristicUUIDOrder(
+        targetCharacteristicUUID: targetCharacteristicUUID,
+        lastTimeSyncUnixSeconds: lastTimeSyncUnixSeconds,
+        nowUnixSeconds: nowUnixSeconds
+    )
+}
+
 public func currentLogTimestamp() -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
     return formatter.string(from: Date())
 }
 

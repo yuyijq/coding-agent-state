@@ -219,6 +219,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
     private var discoveredCharacteristicsByUUID: [String: CBCharacteristic] = [:]
     private var pendingWrites: [BLEWriteRequest] = []
     private var activeWriteRequest: BLEWriteRequest?
+    private var activeWritePlanUnixSeconds: Int64?
     private var pendingServiceDiscoveries = 0
     private var scanAttempt = 0
     private var scanRound = 0
@@ -296,6 +297,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
         discoveredCharacteristicsByUUID.removeAll()
         pendingWrites.removeAll()
         activeWriteRequest = nil
+        activeWritePlanUnixSeconds = nil
         pendingServiceDiscoveries = 0
         log("正在发现目标服务: \(config.serviceUUID)")
         peripheral.discoverServices([CBUUID(string: config.serviceUUID)])
@@ -345,13 +347,22 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             return
         }
 
+        let serviceUUIDs = services.map { $0.uuid.uuidString }.joined(separator: ", ")
+        log("目标服务发现完成: \(serviceUUIDs)")
         pendingServiceDiscoveries = services.count
+        let writePlanUnixSeconds = currentUnixTimestamp()
+        activeWritePlanUnixSeconds = writePlanUnixSeconds
+        let characteristicUUIDs = characteristicUUIDsToDiscover(
+            targetCharacteristicUUID: config.characteristicUUID,
+            lastTimeSyncUnixSeconds: cache.lastTimeSync(for: config.deviceName),
+            nowUnixSeconds: writePlanUnixSeconds
+        ).map { CBUUID(string: $0) }
         startPhaseTimeout("发现特征超时") { [weak self] in
             self?.failActiveAttempt("发现特征超时")
         }
         for service in services {
-            log("正在发现固定特征集合: \(BLEDefaults.writableCharacteristicUUIDs.count) 个")
-            peripheral.discoverCharacteristics(nil, for: service)
+            log("正在发现固定特征集合: \(characteristicUUIDs.count) 个")
+            peripheral.discoverCharacteristics(characteristicUUIDs, for: service)
         }
     }
 
@@ -367,6 +378,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
         discoveredCharacteristics.append(contentsOf: service.characteristics ?? [])
         pendingServiceDiscoveries -= 1
         if pendingServiceDiscoveries == 0 {
+            log("固定特征发现完成: \(discoveredCharacteristics.count) 个")
             handleDiscoveredCharacteristics(peripheral)
         }
     }
@@ -386,6 +398,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             failActiveAttempt("写入失败: \(describe(error))")
             return
         }
+        log("收到写入响应: \(characteristic.uuid.uuidString)")
         completeCurrentWrite(characteristic)
         writeNextPendingValue(on: peripheral)
     }
@@ -653,7 +666,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
         var requests: [BLEWriteRequest] = []
         let normalizedTargetUUID = targetCharacteristicUUID.lowercased()
         let normalizedTimeUUID = BLEDefaults.timeCharacteristicUUID.lowercased()
-        let now = currentUnixTimestamp()
+        let now = activeWritePlanUnixSeconds ?? currentUnixTimestamp()
         let uuidOrder = writeCharacteristicUUIDOrder(
             targetCharacteristicUUID: targetCharacteristicUUID,
             lastTimeSyncUnixSeconds: cache.lastTimeSync(for: config.deviceName),
@@ -714,6 +727,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             startPhaseTimeout("写入超时") { [weak self] in
                 self?.failActiveAttempt("写入超时")
             }
+            log("开始\(request.purpose): \(characteristic.uuid.uuidString) \(formatPayload(request.payload))")
             peripheral.writeValue(request.payload, for: characteristic, type: .withResponse)
         } else if characteristic.properties.contains(.writeWithoutResponse) {
             if !request.isRequired {
@@ -724,6 +738,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
                 return
             }
             activeWriteRequest = request
+            log("开始\(request.purpose)(无响应): \(characteristic.uuid.uuidString) \(formatPayload(request.payload))")
             peripheral.writeValue(request.payload, for: characteristic, type: .withoutResponse)
             completeCurrentWrite(characteristic)
             writeNextPendingValue(on: peripheral)

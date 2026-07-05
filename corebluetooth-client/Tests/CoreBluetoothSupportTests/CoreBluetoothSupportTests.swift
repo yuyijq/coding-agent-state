@@ -27,8 +27,59 @@ final class CoreBluetoothSupportTests: XCTestCase {
         ])
     }
 
+    func testCharacteristicUUIDsToDiscoverUsesFixedWritableSetWhenListing() {
+        XCTAssertEqual(characteristicUUIDsToDiscover(
+            targetCharacteristicUUID: nil,
+            lastTimeSyncUnixSeconds: nil,
+            nowUnixSeconds: 13_600
+        ), [
+            BLEDefaults.ledCharacteristicUUID,
+            BLEDefaults.timeCharacteristicUUID,
+        ])
+    }
+
+    func testCharacteristicUUIDsToDiscoverOnlyUsesLedWhenTimeSyncIsFresh() {
+        XCTAssertEqual(
+            characteristicUUIDsToDiscover(
+                targetCharacteristicUUID: BLEDefaults.ledCharacteristicUUID,
+                lastTimeSyncUnixSeconds: 10_001,
+                nowUnixSeconds: 13_600
+            ),
+            [BLEDefaults.ledCharacteristicUUID]
+        )
+    }
+
+    func testCharacteristicUUIDsToDiscoverUsesLedAndTimeWhenSyncIsExpired() {
+        XCTAssertEqual(
+            characteristicUUIDsToDiscover(
+                targetCharacteristicUUID: BLEDefaults.ledCharacteristicUUID,
+                lastTimeSyncUnixSeconds: 10_000,
+                nowUnixSeconds: 13_600
+            ),
+            [
+                BLEDefaults.ledCharacteristicUUID,
+                BLEDefaults.timeCharacteristicUUID,
+            ]
+        )
+    }
+
+    func testCharacteristicUUIDsToDiscoverOnlyUsesTimeForSyncTime() {
+        XCTAssertEqual(
+            characteristicUUIDsToDiscover(
+                targetCharacteristicUUID: BLEDefaults.timeCharacteristicUUID,
+                lastTimeSyncUnixSeconds: nil,
+                nowUnixSeconds: 13_600
+            ),
+            [BLEDefaults.timeCharacteristicUUID]
+        )
+    }
+
     func testDefaultCachePathLivesInHomeDirectory() {
         XCTAssertEqual(BLEDefaults.cachePath, "~/.ble_device_cache.json")
+    }
+
+    func testDefaultRetryDelayIsHalfASecond() {
+        XCTAssertEqual(BLEDefaults.retryDelay, 0.5)
     }
 
     func testCachePathExpandsHomeDirectory() {
@@ -39,10 +90,19 @@ final class CoreBluetoothSupportTests: XCTestCase {
         )
     }
 
-    func testLogFormatPrefixesTimestamp() {
+    func testLogFormatPrefixesTimestampWithMilliseconds() {
         XCTAssertEqual(
-            formatLogMessage("正在扫描 BLE 设备", timestamp: "2026-07-05 12:34:56"),
-            "[2026-07-05 12:34:56] 正在扫描 BLE 设备"
+            formatLogMessage("正在扫描 BLE 设备", timestamp: "2026-07-05 12:34:56.789"),
+            "[2026-07-05 12:34:56.789] 正在扫描 BLE 设备"
+        )
+    }
+
+    func testCurrentLogTimestampIncludesMilliseconds() {
+        XCTAssertTrue(
+            currentLogTimestamp().range(
+                of: #"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$"#,
+                options: .regularExpression
+            ) != nil
         )
     }
 
