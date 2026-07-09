@@ -11,12 +11,21 @@ The device advertises as `NimBLE_GATT`. After a central device connects, it can 
 
 - Service UUID: `0x1815`
 - LED characteristic UUID: `00001525-1212-efde-1523-785feabcd123`
+- Time characteristic UUID: `01001525-1212-efde-1523-785feabcd123`
 - Access: write
 - Payload: one byte
   - `0x00`: turn all LEDs off
   - `0x01`: turn the red LED on
   - `0x02`: turn the yellow LED on
   - `0x03`: turn the green LED on
+
+The time characteristic configures the clock and deep sleep window with a fixed 6-byte payload:
+
+- Bytes `0..3`: unsigned 32-bit little-endian Unix timestamp in seconds
+- Byte `4`: deep sleep start hour, `0..23`
+- Byte `5`: deep sleep end hour, `0..23`
+
+If the client has no cached sleep window, it sends the default `23:00-09:00` window.
 
 You can test it with *nRF Connect for Mobile* or another BLE GATT client.
 

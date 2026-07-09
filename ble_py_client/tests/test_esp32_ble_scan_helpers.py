@@ -314,7 +314,7 @@ class BleSyncTimeCommandTests(unittest.IsolatedAsyncioTestCase):
                 [
                     {
                         "device_name": "Mina",
-                        "data": b"\x78\x56\x34\x12\x00\x00\x00\x00",
+                        "data": b"\x78\x56\x34\x12\x17\x09",
                         "characteristic_uuid": esp32_ble_client.DEFAULT_TIME_CHAR_UUID,
                         "scan_timeout": 12.0,
                         "scan_rounds": 3,
@@ -331,6 +331,13 @@ class BleSyncTimeCommandTests(unittest.IsolatedAsyncioTestCase):
                 del esp32_ble_client.time
             else:
                 esp32_ble_client.time = original_time
+
+    def test_build_time_sync_payload_rejects_invalid_sleep_window(self):
+        with self.assertRaises(ValueError):
+            esp32_ble_client.build_time_sync_payload(0x12345678, 8, 8)
+
+        with self.assertRaises(ValueError):
+            esp32_ble_client.build_time_sync_payload(0x12345678, 0, 24)
 
 
 if __name__ == "__main__":

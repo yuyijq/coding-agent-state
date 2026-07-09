@@ -17,12 +17,16 @@ public enum BLEDefaults {
     public static let scanTimeout = 12.0
     public static let scanRounds = 3
     public static let timeSyncIntervalSeconds: Int64 = 3600
+    public static let defaultSleepStartHour = 23
+    public static let defaultSleepEndHour = 9
 }
 
 public enum PayloadError: Error, CustomStringConvertible {
     case invalidHexByte(String)
     case byteOutOfRange(String)
     case negativeTimestamp(Int64)
+    case timestampOutOfRange(Int64)
+    case invalidSleepWindow(Int, Int)
 
     public var description: String {
         switch self {
@@ -32,8 +36,35 @@ public enum PayloadError: Error, CustomStringConvertible {
             return "数值必须在 0-255 之间: \(value)"
         case .negativeTimestamp(let value):
             return "时间戳不能为负数: \(value)"
+        case .timestampOutOfRange(let value):
+            return "时间戳超出 4 字节范围: \(value)"
+        case .invalidSleepWindow(let startHour, let endHour):
+            return "deep sleep 时间段无效: \(startHour)-\(endHour)，小时需为 0-23 且起止不能相同"
         }
     }
+}
+
+public struct SleepWindow: Codable, Equatable {
+    public let startHour: Int
+    public let endHour: Int
+
+    public init(startHour: Int, endHour: Int) throws {
+        guard (0...23).contains(startHour),
+              (0...23).contains(endHour),
+              startHour != endHour else {
+            throw PayloadError.invalidSleepWindow(startHour, endHour)
+        }
+
+        self.startHour = startHour
+        self.endHour = endHour
+    }
+}
+
+public func defaultSleepWindow() -> SleepWindow {
+    try! SleepWindow(
+        startHour: BLEDefaults.defaultSleepStartHour,
+        endHour: BLEDefaults.defaultSleepEndHour
+    )
 }
 
 public func parsePayload(_ value: String) throws -> Data {
@@ -57,9 +88,19 @@ public func parsePayload(_ value: String) throws -> Data {
     return Data(trimmed.utf8)
 }
 
-public func buildTimestampPayload(unixTimeSeconds: Int64) -> Data {
-    var value = UInt64(unixTimeSeconds)
-    return Data(bytes: &value, count: MemoryLayout<UInt64>.size)
+public func buildTimeSyncPayload(unixTimeSeconds: Int64, sleepWindow: SleepWindow) throws -> Data {
+    guard unixTimeSeconds >= 0 else {
+        throw PayloadError.negativeTimestamp(unixTimeSeconds)
+    }
+    guard unixTimeSeconds <= Int64(UInt32.max) else {
+        throw PayloadError.timestampOutOfRange(unixTimeSeconds)
+    }
+
+    var value = UInt32(unixTimeSeconds)
+    var payload = Data(bytes: &value, count: MemoryLayout<UInt32>.size)
+    payload.append(UInt8(sleepWindow.startHour))
+    payload.append(UInt8(sleepWindow.endHour))
+    return payload
 }
 
 public func currentUnixTimestamp() -> Int64 {
@@ -147,17 +188,23 @@ public struct DeviceCacheEntry: Codable, Equatable {
     public var address: String?
     public var name: String?
     public var lastTimeSyncUnixSeconds: Int64?
+    public var sleepStartHour: Int?
+    public var sleepEndHour: Int?
 
     public init(
         identifier: String? = nil,
         address: String? = nil,
         name: String? = nil,
-        lastTimeSyncUnixSeconds: Int64? = nil
+        lastTimeSyncUnixSeconds: Int64? = nil,
+        sleepStartHour: Int? = nil,
+        sleepEndHour: Int? = nil
     ) {
         self.identifier = identifier
         self.address = address
         self.name = name
         self.lastTimeSyncUnixSeconds = lastTimeSyncUnixSeconds
+        self.sleepStartHour = sleepStartHour
+        self.sleepEndHour = sleepEndHour
     }
 }
 
@@ -186,6 +233,17 @@ public struct DeviceCache: Codable, Equatable {
         entries[deviceName]?.lastTimeSyncUnixSeconds
     }
 
+    public func sleepWindow(for deviceName: String) -> SleepWindow {
+        guard let entry = entries[deviceName],
+              let startHour = entry.sleepStartHour,
+              let endHour = entry.sleepEndHour,
+              let sleepWindow = try? SleepWindow(startHour: startHour, endHour: endHour) else {
+            return defaultSleepWindow()
+        }
+
+        return sleepWindow
+    }
+
     public mutating func set(identifier: String, name: String?, for deviceName: String) {
         var entry = entries[deviceName] ?? DeviceCacheEntry()
         entry.identifier = identifier
@@ -196,6 +254,13 @@ public struct DeviceCache: Codable, Equatable {
     public mutating func setLastTimeSync(unixTimeSeconds: Int64, for deviceName: String) {
         var entry = entries[deviceName] ?? DeviceCacheEntry()
         entry.lastTimeSyncUnixSeconds = unixTimeSeconds
+        entries[deviceName] = entry
+    }
+
+    public mutating func setSleepWindow(_ sleepWindow: SleepWindow, for deviceName: String) {
+        var entry = entries[deviceName] ?? DeviceCacheEntry()
+        entry.sleepStartHour = sleepWindow.startHour
+        entry.sleepEndHour = sleepWindow.endHour
         entries[deviceName] = entry
     }
 

@@ -21,6 +21,8 @@ DEFAULT_CACHE_PATH = Path(__file__).with_name(".ble_device_cache.json")
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_CLIENT_TIMEOUT = 3.0
 DEFAULT_RETRY_DELAY = 1.2
+DEFAULT_SLEEP_START_HOUR = 23
+DEFAULT_SLEEP_END_HOUR = 9
 
 
 def current_log_timestamp():
@@ -108,10 +110,48 @@ def cache_device_address(cache, device_name, device):
     if not getattr(device, "address", None):
         return
 
-    cache[device_name] = {
-        "address": device.address,
-        "name": device.name,
-    }
+    entry = cache.get(device_name)
+    if not isinstance(entry, dict):
+        entry = {}
+
+    entry["address"] = device.address
+    entry["name"] = device.name
+    cache[device_name] = entry
+
+
+def validate_sleep_window(sleep_start_hour, sleep_end_hour):
+    if not 0 <= sleep_start_hour <= 23:
+        raise ValueError("deep sleep 开始小时必须在 0-23 之间")
+    if not 0 <= sleep_end_hour <= 23:
+        raise ValueError("deep sleep 结束小时必须在 0-23 之间")
+    if sleep_start_hour == sleep_end_hour:
+        raise ValueError("deep sleep 起止小时不能相同")
+
+
+def cached_sleep_window(cache, device_name):
+    entry = cache.get(device_name)
+    if isinstance(entry, dict):
+        start_hour = entry.get("sleepStartHour")
+        end_hour = entry.get("sleepEndHour")
+        if isinstance(start_hour, int) and isinstance(end_hour, int):
+            try:
+                validate_sleep_window(start_hour, end_hour)
+                return start_hour, end_hour
+            except ValueError:
+                pass
+
+    return DEFAULT_SLEEP_START_HOUR, DEFAULT_SLEEP_END_HOUR
+
+
+def cache_sleep_window(cache, device_name, sleep_start_hour, sleep_end_hour):
+    validate_sleep_window(sleep_start_hour, sleep_end_hour)
+    entry = cache.get(device_name)
+    if not isinstance(entry, dict):
+        entry = {}
+
+    entry["sleepStartHour"] = sleep_start_hour
+    entry["sleepEndHour"] = sleep_end_hour
+    cache[device_name] = entry
 
 
 def parse_payload(value):
@@ -123,12 +163,21 @@ def parse_payload(value):
     return value.encode("utf-8")
 
 
-def build_timestamp_payload(unix_time_seconds=None):
+def build_time_sync_payload(
+    unix_time_seconds=None,
+    sleep_start_hour=DEFAULT_SLEEP_START_HOUR,
+    sleep_end_hour=DEFAULT_SLEEP_END_HOUR,
+):
     if unix_time_seconds is None:
         unix_time_seconds = int(time.time())
     if unix_time_seconds < 0:
         raise ValueError("时间戳不能为负数")
-    return int(unix_time_seconds).to_bytes(8, byteorder="little", signed=False)
+    if unix_time_seconds > 0xFFFFFFFF:
+        raise ValueError("时间戳超出 4 字节范围")
+
+    validate_sleep_window(sleep_start_hour, sleep_end_hour)
+    payload = int(unix_time_seconds).to_bytes(4, byteorder="little", signed=False)
+    return payload + bytes([sleep_start_hour, sleep_end_hour])
 
 
 def list_devices(devices):
@@ -354,6 +403,9 @@ def build_parser():
     parser.add_argument("--retry-delay", type=float, default=DEFAULT_RETRY_DELAY, help="连接/写入失败后的重试等待秒数，默认 1.2")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("sync-time", help="同步电脑当前 Unix 秒级时间戳")
+    update_parser = subparsers.add_parser("update-sleep-time", help="更新缓存里的 deep sleep 小时段并同步到设备")
+    update_parser.add_argument("sleep_start_hour", type=int)
+    update_parser.add_argument("sleep_end_hour", type=int)
     return parser
 
 
@@ -365,10 +417,25 @@ def resolve_characteristic_uuid(args, default_uuid):
 
 async def main(argv=None):
     args = build_parser().parse_args(argv)
+    cache = load_device_cache(args.cache_path)
+
     if args.command == "sync-time":
-        data = build_timestamp_payload()
+        sleep_start_hour, sleep_end_hour = cached_sleep_window(cache, args.name)
+        data = build_time_sync_payload(
+            sleep_start_hour=sleep_start_hour,
+            sleep_end_hour=sleep_end_hour,
+        )
         characteristic_uuid = resolve_characteristic_uuid(args, DEFAULT_TIME_CHAR_UUID)
-        log(f"同步电脑时间戳: {int.from_bytes(data, byteorder='little', signed=False)}")
+        log(f"同步电脑时间戳: {int.from_bytes(data[:4], byteorder='little', signed=False)}")
+    elif args.command == "update-sleep-time":
+        cache_sleep_window(cache, args.name, args.sleep_start_hour, args.sleep_end_hour)
+        save_device_cache(cache, args.cache_path)
+        data = build_time_sync_payload(
+            sleep_start_hour=args.sleep_start_hour,
+            sleep_end_hour=args.sleep_end_hour,
+        )
+        characteristic_uuid = resolve_characteristic_uuid(args, DEFAULT_TIME_CHAR_UUID)
+        log(f"更新 deep sleep 时间段: {args.sleep_start_hour}:00-{args.sleep_end_hour}:00")
     else:
         data = parse_payload(args.data)
         characteristic_uuid = resolve_characteristic_uuid(args, DEFAULT_CHAR_UUID)

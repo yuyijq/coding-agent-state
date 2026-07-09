@@ -9,11 +9,24 @@ final class CoreBluetoothSupportTests: XCTestCase {
         XCTAssertEqual(try parsePayload("hello"), Data("hello".utf8))
     }
 
-    func testTimestampPayloadIsEightByteLittleEndian() {
+    func testTimeSyncPayloadIsFourByteTimestampPlusSleepWindow() throws {
         XCTAssertEqual(
-            buildTimestampPayload(unixTimeSeconds: 0x12345678),
-            Data([0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00])
+            try buildTimeSyncPayload(
+                unixTimeSeconds: 0x12345678,
+                sleepWindow: SleepWindow(startHour: 23, endHour: 9)
+            ),
+            Data([0x78, 0x56, 0x34, 0x12, 0x17, 0x09])
         )
+    }
+
+    func testSleepWindowRejectsInvalidHoursAndEqualEndpoints() {
+        XCTAssertThrowsError(try SleepWindow(startHour: -1, endHour: 8))
+        XCTAssertThrowsError(try SleepWindow(startHour: 0, endHour: 24))
+        XCTAssertThrowsError(try SleepWindow(startHour: 8, endHour: 8))
+    }
+
+    func testDefaultSleepWindowIsTwentyThreeToNine() throws {
+        XCTAssertEqual(defaultSleepWindow(), try SleepWindow(startHour: 23, endHour: 9))
     }
 
     func testDefaultServiceUUIDTargetsAutomationIOService() {
@@ -110,6 +123,7 @@ final class CoreBluetoothSupportTests: XCTestCase {
         var cache = DeviceCache()
         cache.set(identifier: "550E8400-E29B-41D4-A716-446655440000", name: "Mina-15", for: "Mina")
         cache.setLastTimeSync(unixTimeSeconds: 1_788_000_000, for: "Mina")
+        cache.setSleepWindow(try SleepWindow(startHour: 23, endHour: 7), for: "Mina")
 
         let data = try JSONEncoder.bleCacheEncoder.encode(cache)
         let decoded = try JSONDecoder().decode(DeviceCache.self, from: data)
@@ -117,6 +131,20 @@ final class CoreBluetoothSupportTests: XCTestCase {
         XCTAssertEqual(decoded.identifier(for: "Mina"), "550E8400-E29B-41D4-A716-446655440000")
         XCTAssertEqual(decoded.entries["Mina"]?.name, "Mina-15")
         XCTAssertEqual(decoded.lastTimeSync(for: "Mina"), 1_788_000_000)
+        XCTAssertEqual(decoded.sleepWindow(for: "Mina"), try SleepWindow(startHour: 23, endHour: 7))
+    }
+
+    func testCacheSleepWindowFallsBackToDefaultWhenMissingOrInvalid() throws {
+        var cache = DeviceCache(entries: [
+            "Missing": DeviceCacheEntry(),
+            "Invalid": DeviceCacheEntry(sleepStartHour: 9, sleepEndHour: 9),
+        ])
+
+        XCTAssertEqual(cache.sleepWindow(for: "Missing"), defaultSleepWindow())
+        XCTAssertEqual(cache.sleepWindow(for: "Invalid"), defaultSleepWindow())
+
+        cache.setSleepWindow(try SleepWindow(startHour: 22, endHour: 6), for: "Missing")
+        XCTAssertEqual(cache.sleepWindow(for: "Missing"), try SleepWindow(startHour: 22, endHour: 6))
     }
 
     func testTimeSyncIsNeededWhenMissingOrOlderThanOneHour() {

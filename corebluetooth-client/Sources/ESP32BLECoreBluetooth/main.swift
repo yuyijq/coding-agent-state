@@ -14,11 +14,15 @@ private struct ClientConfig {
     var connectRetries = BLEDefaults.connectRetries
     var clientTimeout = BLEDefaults.clientTimeout
     var retryDelay = BLEDefaults.retryDelay
+    var sendsCurrentTime = false
+    var sleepWindowOverride: SleepWindow?
+    var shouldUpdateCachedSleepWindow = false
 }
 
 private enum CommandMode {
     case writeData(String)
     case syncTime
+    case updateSleepTime(Int, Int)
 }
 
 private enum CLIError: Error, CustomStringConvertible {
@@ -48,6 +52,7 @@ private let usageText = """
 用法:
   esp32-ble-corebluetooth [选项]
   esp32-ble-corebluetooth [选项] sync-time
+  esp32-ble-corebluetooth [选项] update-sleep-time <startHour> <endHour>
 
 选项:
   --name <name>              设备名包含匹配，默认 \(BLEDefaults.deviceName)
@@ -128,6 +133,16 @@ private func parseArguments(_ arguments: [String]) throws -> ClientConfig {
             config.retryDelay = number
         case "sync-time":
             mode = .syncTime
+        case "update-sleep-time":
+            let startValue = try nextValue(for: argument)
+            let endValue = try nextValue(for: argument)
+            guard let startHour = Int(startValue) else {
+                throw CLIError.invalidNumber("startHour", startValue)
+            }
+            guard let endHour = Int(endValue) else {
+                throw CLIError.invalidNumber("endHour", endValue)
+            }
+            mode = .updateSleepTime(startHour, endHour)
         default:
             throw CLIError.unknownOption(argument)
         }
@@ -147,9 +162,21 @@ private func parseArguments(_ arguments: [String]) throws -> ClientConfig {
         guard timestamp >= 0 else {
             throw CLIError.invalidPayload(String(describing: PayloadError.negativeTimestamp(timestamp)))
         }
-        config.payload = buildTimestampPayload(unixTimeSeconds: timestamp)
         config.characteristicUUID = resolveCharacteristicUUID(explicitUUID, defaultUUID: BLEDefaults.timeCharacteristicUUID)
+        config.sendsCurrentTime = true
         log("同步电脑时间戳: \(timestamp)")
+    case .updateSleepTime(let startHour, let endHour):
+        let sleepWindow: SleepWindow
+        do {
+            sleepWindow = try SleepWindow(startHour: startHour, endHour: endHour)
+        } catch {
+            throw CLIError.invalidPayload(String(describing: error))
+        }
+        config.characteristicUUID = resolveCharacteristicUUID(explicitUUID, defaultUUID: BLEDefaults.timeCharacteristicUUID)
+        config.sendsCurrentTime = true
+        config.sleepWindowOverride = sleepWindow
+        config.shouldUpdateCachedSleepWindow = true
+        log("更新 deep sleep 时间段: \(sleepWindow.startHour):00-\(sleepWindow.endHour):00")
     }
 
     config.scanTimeout = max(1.0, config.scanTimeout)
@@ -189,13 +216,13 @@ private struct RuntimeError: Error, CustomStringConvertible {
 }
 
 private func currentUnixTimestampFromPayload(_ payload: Data) -> Int64? {
-    guard payload.count == MemoryLayout<UInt64>.size else {
+    guard payload.count == 6 else {
         return nil
     }
 
-    var value: UInt64 = 0
-    for (index, byte) in payload.enumerated() {
-        value |= UInt64(byte) << UInt64(index * 8)
+    var value: UInt32 = 0
+    for (index, byte) in payload.prefix(MemoryLayout<UInt32>.size).enumerated() {
+        value |= UInt32(byte) << UInt32(index * 8)
     }
     return Int64(value)
 }
@@ -233,6 +260,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
     }
 
     func start() {
+        updateCachedSleepWindowIfNeeded()
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
@@ -667,6 +695,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
         let normalizedTargetUUID = targetCharacteristicUUID.lowercased()
         let normalizedTimeUUID = BLEDefaults.timeCharacteristicUUID.lowercased()
         let now = activeWritePlanUnixSeconds ?? currentUnixTimestamp()
+        let sleepWindow = config.sleepWindowOverride ?? cache.sleepWindow(for: config.deviceName)
         let uuidOrder = writeCharacteristicUUIDOrder(
             targetCharacteristicUUID: targetCharacteristicUUID,
             lastTimeSyncUnixSeconds: cache.lastTimeSync(for: config.deviceName),
@@ -687,18 +716,27 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             }
 
             if normalizedUUID == normalizedTargetUUID {
+                let payload = try payloadForTargetWrite(
+                    normalizedTargetUUID: normalizedTargetUUID,
+                    normalizedTimeUUID: normalizedTimeUUID,
+                    now: now,
+                    sleepWindow: sleepWindow
+                )
                 requests.append(BLEWriteRequest(
                     characteristicUUID: targetCharacteristicUUID,
-                    payload: config.payload,
-                    purpose: normalizedTargetUUID == normalizedTimeUUID ? "同步时间" : "写入指令",
-                    timeSyncUnixSeconds: normalizedTargetUUID == normalizedTimeUUID ? currentUnixTimestampFromPayload(config.payload) : nil,
+                    payload: payload,
+                    purpose: purposeForTargetWrite(
+                        normalizedTargetUUID: normalizedTargetUUID,
+                        normalizedTimeUUID: normalizedTimeUUID
+                    ),
+                    timeSyncUnixSeconds: normalizedTargetUUID == normalizedTimeUUID ? currentUnixTimestampFromPayload(payload) : nil,
                     isRequired: true
                 ))
             } else if normalizedUUID == normalizedTimeUUID {
-                log("上次同步时间超过 1 小时或无记录，指令写入后同步电脑时间戳: \(now)")
+                log("上次同步时间超过 1 小时或无记录，指令写入后同步电脑时间戳: \(now)，deep sleep: \(sleepWindow.startHour)-\(sleepWindow.endHour)")
                 requests.append(BLEWriteRequest(
                     characteristicUUID: BLEDefaults.timeCharacteristicUUID,
-                    payload: buildTimestampPayload(unixTimeSeconds: now),
+                    payload: try buildTimeSyncPayload(unixTimeSeconds: now, sleepWindow: sleepWindow),
                     purpose: "同步时间",
                     timeSyncUnixSeconds: now,
                     isRequired: false
@@ -707,6 +745,27 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
         }
 
         return requests
+    }
+
+    private func payloadForTargetWrite(
+        normalizedTargetUUID: String,
+        normalizedTimeUUID: String,
+        now: Int64,
+        sleepWindow: SleepWindow
+    ) throws -> Data {
+        guard normalizedTargetUUID == normalizedTimeUUID, config.sendsCurrentTime else {
+            return config.payload
+        }
+
+        return try buildTimeSyncPayload(unixTimeSeconds: now, sleepWindow: sleepWindow)
+    }
+
+    private func purposeForTargetWrite(normalizedTargetUUID: String, normalizedTimeUUID: String) -> String {
+        guard normalizedTargetUUID == normalizedTimeUUID else {
+            return "写入指令"
+        }
+
+        return config.sleepWindowOverride == nil ? "同步时间" : "更新时间和 deep sleep 时间段"
     }
 
     private func writeNextPendingValue(on peripheral: CBPeripheral) {
@@ -862,6 +921,21 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             try cache.save(to: config.cachePath)
         } catch {
             log("缓存设备 identifier 失败，但会继续连接: \(describe(error))")
+        }
+    }
+
+    private func updateCachedSleepWindowIfNeeded() {
+        guard config.shouldUpdateCachedSleepWindow,
+              let sleepWindow = config.sleepWindowOverride else {
+            return
+        }
+
+        cache.setSleepWindow(sleepWindow, for: config.deviceName)
+        do {
+            try cache.save(to: config.cachePath)
+            log("已缓存 deep sleep 时间段: \(sleepWindow.startHour)-\(sleepWindow.endHour)")
+        } catch {
+            log("缓存 deep sleep 时间段失败，但会继续同步到设备: \(describe(error))")
         }
     }
 

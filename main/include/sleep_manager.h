@@ -10,6 +10,8 @@
 
 void sleep_manager_init(void);
 void sleep_manager_handle_wakeup(void);
-void sleep_manager_update_time(uint64_t unix_time_seconds);
+void sleep_manager_update_time(uint32_t unix_time_seconds,
+                               uint8_t sleep_start_hour,
+                               uint8_t sleep_end_hour);
 
 #endif // SLEEP_MANAGER_H

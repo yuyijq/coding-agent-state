@@ -14,6 +14,9 @@ static int led_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                           struct ble_gatt_access_ctxt *ctxt, void *arg);
 static uint64_t read_le_uint(const uint8_t *data, uint16_t len);
 
+/* Defines */
+#define TIME_SYNC_PAYLOAD_LEN 6
+
 /* Private variables */
 /* Automation IO service */
 static const ble_uuid16_t auto_io_svc_uuid = BLE_UUID16_INIT(0x1815);
@@ -98,20 +101,24 @@ static int led_chr_access(uint16_t conn_handle, uint16_t attr_handle,
         }
 
         if (attr_handle == time_chr_val_handle) {
-            if (ctxt->om->om_len != sizeof(uint32_t) &&
-                ctxt->om->om_len != sizeof(uint64_t)) {
+            if (ctxt->om->om_len != TIME_SYNC_PAYLOAD_LEN) {
                 return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
             }
 
-            uint8_t timestamp_bytes[sizeof(uint64_t)] = {0};
+            uint8_t timestamp_bytes[TIME_SYNC_PAYLOAD_LEN] = {0};
             rc = os_mbuf_copydata(ctxt->om, 0, ctxt->om->om_len,
                                   timestamp_bytes);
             if (rc != 0) {
                 return BLE_ATT_ERR_UNLIKELY;
             }
+            if (timestamp_bytes[4] > 23 || timestamp_bytes[5] > 23 ||
+                timestamp_bytes[4] == timestamp_bytes[5]) {
+                return BLE_ATT_ERR_VALUE_NOT_ALLOWED;
+            }
 
-            sleep_manager_update_time(
-                read_le_uint(timestamp_bytes, ctxt->om->om_len));
+            uint32_t unix_time_seconds =
+                (uint32_t)read_le_uint(timestamp_bytes, sizeof(uint32_t));
+            sleep_manager_update_time(unix_time_seconds, timestamp_bytes[4], timestamp_bytes[5]);
             return 0;
         }
         goto error;

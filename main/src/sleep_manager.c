@@ -17,8 +17,8 @@
 #include <time.h>
 
 /* Defines */
-#define SLEEP_START_HOUR 0
-#define SLEEP_END_HOUR 8
+#define DEFAULT_SLEEP_START_HOUR 23
+#define DEFAULT_SLEEP_END_HOUR 9
 #define SECONDS_PER_MINUTE 60
 #define SECONDS_PER_HOUR (60 * SECONDS_PER_MINUTE)
 #define SECONDS_PER_DAY (24 * SECONDS_PER_HOUR)
@@ -30,13 +30,21 @@ static void deep_sleep_timer_cb(void *arg);
 static void schedule_next_sleep(void);
 static uint32_t seconds_since_midnight(const struct tm *timeinfo);
 static uint64_t seconds_until_hour(const struct tm *timeinfo, int hour);
+static bool is_valid_sleep_window(uint8_t sleep_start_hour,
+                                  uint8_t sleep_end_hour);
+static bool sleep_window_crosses_midnight(void);
+static bool is_in_active_sleep_window(uint32_t now_sec);
 static void enter_scheduled_deep_sleep(uint64_t sleep_seconds);
 
 /* Private variables */
 static esp_timer_handle_t deep_sleep_timer;
 static bool time_is_valid;
+static uint8_t active_sleep_start_hour = DEFAULT_SLEEP_START_HOUR;
+static uint8_t active_sleep_end_hour = DEFAULT_SLEEP_END_HOUR;
 static RTC_DATA_ATTR uint32_t planned_wakeup_magic;
 static RTC_DATA_ATTR uint64_t planned_wakeup_unix_time;
+static RTC_DATA_ATTR uint8_t planned_sleep_start_hour;
+static RTC_DATA_ATTR uint8_t planned_sleep_end_hour;
 
 /* Private functions */
 static void deep_sleep_timer_cb(void *arg) {
@@ -61,6 +69,29 @@ static uint64_t seconds_until_hour(const struct tm *timeinfo, int hour) {
     return SECONDS_PER_DAY - now + target;
 }
 
+static bool is_valid_sleep_window(uint8_t sleep_start_hour,
+                                  uint8_t sleep_end_hour) {
+    return sleep_start_hour < 24 && sleep_end_hour < 24 &&
+           sleep_start_hour != sleep_end_hour;
+}
+
+static bool sleep_window_crosses_midnight(void) {
+    return active_sleep_start_hour > active_sleep_end_hour;
+}
+
+static bool is_in_active_sleep_window(uint32_t now_sec) {
+    const uint32_t sleep_start_sec =
+        (uint32_t)active_sleep_start_hour * SECONDS_PER_HOUR;
+    const uint32_t sleep_end_sec =
+        (uint32_t)active_sleep_end_hour * SECONDS_PER_HOUR;
+
+    if (sleep_window_crosses_midnight()) {
+        return now_sec >= sleep_start_sec || now_sec < sleep_end_sec;
+    }
+
+    return now_sec >= sleep_start_sec && now_sec < sleep_end_sec;
+}
+
 static void enter_scheduled_deep_sleep(uint64_t sleep_seconds) {
     if (sleep_seconds == 0) {
         sleep_seconds = 1;
@@ -70,9 +101,13 @@ static void enter_scheduled_deep_sleep(uint64_t sleep_seconds) {
     time_t now;
     if (time(&now) != (time_t)-1) {
         planned_wakeup_unix_time = (uint64_t)now + sleep_seconds;
+        planned_sleep_start_hour = active_sleep_start_hour;
+        planned_sleep_end_hour = active_sleep_end_hour;
         planned_wakeup_magic = PLANNED_WAKEUP_MAGIC;
     } else {
         planned_wakeup_unix_time = 0;
+        planned_sleep_start_hour = DEFAULT_SLEEP_START_HOUR;
+        planned_sleep_end_hour = DEFAULT_SLEEP_END_HOUR;
         planned_wakeup_magic = 0;
     }
 
@@ -97,16 +132,15 @@ static void schedule_next_sleep(void) {
     }
 
     const uint32_t now_sec = seconds_since_midnight(&timeinfo);
-    const uint32_t sleep_start_sec = SLEEP_START_HOUR * SECONDS_PER_HOUR;
-    const uint32_t sleep_end_sec = SLEEP_END_HOUR * SECONDS_PER_HOUR;
 
-    if (now_sec >= sleep_start_sec && now_sec < sleep_end_sec) {
-        enter_scheduled_deep_sleep(sleep_end_sec - now_sec);
+    if (is_in_active_sleep_window(now_sec)) {
+        enter_scheduled_deep_sleep(
+            seconds_until_hour(&timeinfo, active_sleep_end_hour));
         return;
     }
 
-    const uint64_t seconds_to_sleep = seconds_until_hour(&timeinfo,
-                                                          SLEEP_START_HOUR);
+    const uint64_t seconds_to_sleep =
+        seconds_until_hour(&timeinfo, active_sleep_start_hour);
     esp_err_t ret = esp_timer_stop(deep_sleep_timer);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_ERROR_CHECK(ret);
@@ -142,6 +176,11 @@ void sleep_manager_handle_wakeup(void) {
         ESP_LOGW(TAG, "timer wakeup without planned wakeup time");
         return;
     }
+    if (!is_valid_sleep_window(planned_sleep_start_hour,
+                               planned_sleep_end_hour)) {
+        ESP_LOGW(TAG, "timer wakeup without planned sleep window");
+        return;
+    }
 
     const struct timeval now = {
         .tv_sec = (time_t)planned_wakeup_unix_time,
@@ -150,21 +189,37 @@ void sleep_manager_handle_wakeup(void) {
     planned_wakeup_magic = 0;
     ESP_ERROR_CHECK(settimeofday(&now, NULL));
     time_is_valid = true;
+    active_sleep_start_hour = planned_sleep_start_hour;
+    active_sleep_end_hour = planned_sleep_end_hour;
 
-    ESP_LOGI(TAG, "time restored from deep sleep wakeup: %" PRIu64,
-             planned_wakeup_unix_time);
+    ESP_LOGI(TAG, "time restored from deep sleep wakeup: %" PRIu64
+                  ", deep sleep window: %u-%u",
+             planned_wakeup_unix_time, active_sleep_start_hour,
+             active_sleep_end_hour);
     schedule_next_sleep();
 }
 
-void sleep_manager_update_time(uint64_t unix_time_seconds) {
+void sleep_manager_update_time(uint32_t unix_time_seconds,
+                               uint8_t sleep_start_hour,
+                               uint8_t sleep_end_hour) {
+    if (!is_valid_sleep_window(sleep_start_hour, sleep_end_hour)) {
+        ESP_LOGW(TAG, "invalid deep sleep window: %u-%u", sleep_start_hour,
+                 sleep_end_hour);
+        return;
+    }
+
     const struct timeval now = {
         .tv_sec = (time_t)unix_time_seconds,
     };
 
     ESP_ERROR_CHECK(settimeofday(&now, NULL));
     time_is_valid = true;
+    active_sleep_start_hour = sleep_start_hour;
+    active_sleep_end_hour = sleep_end_hour;
 
-    ESP_LOGI(TAG, "time updated from BLE timestamp: %" PRIu64,
-             unix_time_seconds);
+    ESP_LOGI(TAG, "time updated from BLE timestamp: %" PRIu32
+                  ", deep sleep window: %u-%u",
+             unix_time_seconds, active_sleep_start_hour,
+             active_sleep_end_hour);
     schedule_next_sleep();
 }
