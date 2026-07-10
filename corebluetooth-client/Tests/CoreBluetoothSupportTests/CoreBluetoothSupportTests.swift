@@ -40,6 +40,32 @@ final class CoreBluetoothSupportTests: XCTestCase {
         ])
     }
 
+    func testLedInitializationWritesCycleColorsThenTurnOff() {
+        let writes = ledInitializationWrites()
+
+        XCTAssertEqual(writes.map(\.payload), [
+            Data([0x01]),
+            Data([0x02]),
+            Data([0x03]),
+            Data([0x01]),
+            Data([0x02]),
+            Data([0x03]),
+            Data([0x01]),
+            Data([0x02]),
+            Data([0x03]),
+            Data([0x00]),
+        ])
+        XCTAssertEqual(writes.dropLast().map(\.delayAfterSeconds), Array(repeating: 0.05, count: 9))
+        XCTAssertNil(writes.last?.delayAfterSeconds)
+    }
+
+    func testNamedDeviceInitializationDependsOnCacheFileAndEntry() {
+        XCTAssertTrue(shouldInitializeNamedDevice(cacheFileExists: false, hasNamedCacheEntry: false))
+        XCTAssertTrue(shouldInitializeNamedDevice(cacheFileExists: true, hasNamedCacheEntry: false))
+        XCTAssertFalse(shouldInitializeNamedDevice(cacheFileExists: true, hasNamedCacheEntry: true))
+        XCTAssertFalse(shouldInitializeNamedDevice(cacheFileExists: false, hasNamedCacheEntry: false, useCache: false))
+    }
+
     func testCharacteristicUUIDsToDiscoverUsesFixedWritableSetWhenListing() {
         XCTAssertEqual(characteristicUUIDsToDiscover(
             targetCharacteristicUUID: nil,
@@ -73,6 +99,18 @@ final class CoreBluetoothSupportTests: XCTestCase {
                 BLEDefaults.ledCharacteristicUUID,
                 BLEDefaults.timeCharacteristicUUID,
             ]
+        )
+    }
+
+    func testCharacteristicUUIDsToDiscoverSkipsAutomaticTimeSyncWhenDisabled() {
+        XCTAssertEqual(
+            characteristicUUIDsToDiscover(
+                targetCharacteristicUUID: BLEDefaults.ledCharacteristicUUID,
+                lastTimeSyncUnixSeconds: 10_000,
+                nowUnixSeconds: 13_600,
+                autoTimeSync: false
+            ),
+            [BLEDefaults.ledCharacteristicUUID]
         )
     }
 
@@ -147,6 +185,41 @@ final class CoreBluetoothSupportTests: XCTestCase {
         XCTAssertEqual(cache.sleepWindow(for: "Missing"), try SleepWindow(startHour: 22, endHour: 6))
     }
 
+    func testCachedConnectionTargetsUseAllCachedIdentifiersInStableOrder() {
+        let cache = DeviceCache(entries: [
+            "Mina-B": DeviceCacheEntry(identifier: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB", name: "Mina-B"),
+            "Mina-A": DeviceCacheEntry(identifier: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", name: "Mina-A"),
+        ])
+
+        XCTAssertEqual(cache.cachedConnectionTargets(), [
+            CachedDeviceTarget(
+                cacheKey: "Mina-A",
+                identifier: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+                name: "Mina-A"
+            ),
+            CachedDeviceTarget(
+                cacheKey: "Mina-B",
+                identifier: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB",
+                name: "Mina-B"
+            ),
+        ])
+    }
+
+    func testCachedConnectionTargetsIgnoreEntriesWithoutIdentifiers() {
+        let cache = DeviceCache(entries: [
+            "NoIdentifier": DeviceCacheEntry(name: "Mina-X"),
+            "WithIdentifier": DeviceCacheEntry(identifier: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"),
+        ])
+
+        XCTAssertEqual(cache.cachedConnectionTargets(), [
+            CachedDeviceTarget(
+                cacheKey: "WithIdentifier",
+                identifier: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+                name: nil
+            ),
+        ])
+    }
+
     func testTimeSyncIsNeededWhenMissingOrOlderThanOneHour() {
         XCTAssertTrue(needsTimeSync(lastSyncUnixSeconds: nil, nowUnixSeconds: 10_000))
         XCTAssertTrue(needsTimeSync(lastSyncUnixSeconds: 10_000, nowUnixSeconds: 13_600))
@@ -164,6 +237,18 @@ final class CoreBluetoothSupportTests: XCTestCase {
                 BLEDefaults.ledCharacteristicUUID,
                 BLEDefaults.timeCharacteristicUUID,
             ]
+        )
+    }
+
+    func testLedCommandWriteOrderSkipsAutomaticTimeSyncWhenDisabled() {
+        XCTAssertEqual(
+            writeCharacteristicUUIDOrder(
+                targetCharacteristicUUID: BLEDefaults.ledCharacteristicUUID,
+                lastTimeSyncUnixSeconds: 10_000,
+                nowUnixSeconds: 13_600,
+                autoTimeSync: false
+            ),
+            [BLEDefaults.ledCharacteristicUUID]
         )
     }
 

@@ -19,6 +19,7 @@ public enum BLEDefaults {
     public static let timeSyncIntervalSeconds: Int64 = 3600
     public static let defaultSleepStartHour = 23
     public static let defaultSleepEndHour = 9
+    public static let initializationDelaySeconds = 0.05
 }
 
 public enum PayloadError: Error, CustomStringConvertible {
@@ -103,6 +104,50 @@ public func buildTimeSyncPayload(unixTimeSeconds: Int64, sleepWindow: SleepWindo
     return payload
 }
 
+public struct LEDInitializationWrite: Equatable {
+    public let payload: Data
+    public let delayAfterSeconds: Double?
+
+    public init(payload: Data, delayAfterSeconds: Double?) {
+        self.payload = payload
+        self.delayAfterSeconds = delayAfterSeconds
+    }
+}
+
+public func ledInitializationWrites(
+    delaySeconds: Double = BLEDefaults.initializationDelaySeconds
+) -> [LEDInitializationWrite] {
+    let cyclePayloads = [
+        Data([0x01]),
+        Data([0x02]),
+        Data([0x03]),
+        Data([0x01]),
+        Data([0x02]),
+        Data([0x03]),
+        Data([0x01]),
+        Data([0x02]),
+        Data([0x03]),
+    ]
+
+    return cyclePayloads.map {
+        LEDInitializationWrite(payload: $0, delayAfterSeconds: delaySeconds)
+    } + [
+        LEDInitializationWrite(payload: Data([0x00]), delayAfterSeconds: nil),
+    ]
+}
+
+public func shouldInitializeNamedDevice(
+    cacheFileExists: Bool,
+    hasNamedCacheEntry: Bool,
+    useCache: Bool = true
+) -> Bool {
+    guard useCache else {
+        return false
+    }
+
+    return !cacheFileExists || !hasNamedCacheEntry
+}
+
 public func currentUnixTimestamp() -> Int64 {
     Int64(Date().timeIntervalSince1970)
 }
@@ -121,12 +166,17 @@ public func needsTimeSync(
 public func writeCharacteristicUUIDOrder(
     targetCharacteristicUUID: String,
     lastTimeSyncUnixSeconds: Int64?,
-    nowUnixSeconds: Int64
+    nowUnixSeconds: Int64,
+    autoTimeSync: Bool = true
 ) -> [String] {
     let normalizedTargetUUID = targetCharacteristicUUID.lowercased()
     let normalizedTimeUUID = BLEDefaults.timeCharacteristicUUID.lowercased()
 
     guard normalizedTargetUUID != normalizedTimeUUID else {
+        return [targetCharacteristicUUID]
+    }
+
+    guard autoTimeSync else {
         return [targetCharacteristicUUID]
     }
 
@@ -143,7 +193,8 @@ public func writeCharacteristicUUIDOrder(
 public func characteristicUUIDsToDiscover(
     targetCharacteristicUUID: String?,
     lastTimeSyncUnixSeconds: Int64?,
-    nowUnixSeconds: Int64
+    nowUnixSeconds: Int64,
+    autoTimeSync: Bool = true
 ) -> [String] {
     guard let targetCharacteristicUUID else {
         return BLEDefaults.writableCharacteristicUUIDs
@@ -152,7 +203,8 @@ public func characteristicUUIDsToDiscover(
     return writeCharacteristicUUIDOrder(
         targetCharacteristicUUID: targetCharacteristicUUID,
         lastTimeSyncUnixSeconds: lastTimeSyncUnixSeconds,
-        nowUnixSeconds: nowUnixSeconds
+        nowUnixSeconds: nowUnixSeconds,
+        autoTimeSync: autoTimeSync
     )
 }
 
@@ -208,6 +260,20 @@ public struct DeviceCacheEntry: Codable, Equatable {
     }
 }
 
+public struct CachedDeviceTarget: Equatable {
+    public let cacheKey: String
+    public let identifier: String
+    public let name: String?
+    public let requiresInitialization: Bool
+
+    public init(cacheKey: String, identifier: String, name: String?, requiresInitialization: Bool = false) {
+        self.cacheKey = cacheKey
+        self.identifier = identifier
+        self.name = name
+        self.requiresInitialization = requiresInitialization
+    }
+}
+
 public struct DeviceCache: Codable, Equatable {
     public var entries: [String: DeviceCacheEntry]
 
@@ -242,6 +308,21 @@ public struct DeviceCache: Codable, Equatable {
         }
 
         return sleepWindow
+    }
+
+    public func cachedConnectionTargets() -> [CachedDeviceTarget] {
+        entries.keys.sorted().compactMap { cacheKey in
+            guard let identifier = entries[cacheKey]?.identifier,
+                  !identifier.isEmpty else {
+                return nil
+            }
+
+            return CachedDeviceTarget(
+                cacheKey: cacheKey,
+                identifier: identifier,
+                name: entries[cacheKey]?.name
+            )
+        }
     }
 
     public mutating func set(identifier: String, name: String?, for deviceName: String) {
