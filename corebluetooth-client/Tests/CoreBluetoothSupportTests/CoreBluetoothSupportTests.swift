@@ -66,6 +66,13 @@ final class CoreBluetoothSupportTests: XCTestCase {
         XCTAssertFalse(shouldInitializeNamedDevice(cacheFileExists: false, hasNamedCacheEntry: false, useCache: false))
     }
 
+    func testInitializationCachePolicyWaitsForSuccessfulWrites() {
+        XCTAssertTrue(shouldCacheIdentifierWhenDiscovered(requiresInitialization: false))
+        XCTAssertFalse(shouldCacheIdentifierWhenDiscovered(requiresInitialization: true))
+        XCTAssertFalse(shouldCacheIdentifierAfterSuccessfulWrites(requiresInitialization: false))
+        XCTAssertTrue(shouldCacheIdentifierAfterSuccessfulWrites(requiresInitialization: true))
+    }
+
     func testCharacteristicUUIDsToDiscoverUsesFixedWritableSetWhenListing() {
         XCTAssertEqual(characteristicUUIDsToDiscover(
             targetCharacteristicUUID: nil,

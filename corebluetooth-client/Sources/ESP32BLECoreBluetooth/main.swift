@@ -318,7 +318,11 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
 
         let foundName = displayName(peripheral, advertisementData: advertisementData) ?? activeDisplayTargetName()
         log("找到设备: \(foundName) (\(peripheral.identifier.uuidString))")
-        remember(peripheral: peripheral, name: foundName)
+        if shouldCacheIdentifierWhenDiscovered(requiresInitialization: activeTargetRequiresInitialization) {
+            remember(peripheral: peripheral, name: foundName)
+        } else {
+            log("初始化完成前不写入设备缓存。")
+        }
 
         connectAndWrite(peripheral: peripheral, displayName: foundName) { [weak self] in
             self?.handleScannedConnectionFailure()
@@ -1041,6 +1045,11 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
     }
 
     private func completeActiveAttempt() {
+        if shouldCacheIdentifierAfterSuccessfulWrites(requiresInitialization: activeTargetRequiresInitialization),
+           let peripheral = activePeripheral {
+            remember(peripheral: peripheral, name: activeDisplayName)
+        }
+
         disconnectActivePeripheral {
             self.completeActiveTarget()
         }

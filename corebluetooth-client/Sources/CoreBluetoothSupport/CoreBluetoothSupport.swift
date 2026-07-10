@@ -148,6 +148,14 @@ public func shouldInitializeNamedDevice(
     return !cacheFileExists || !hasNamedCacheEntry
 }
 
+public func shouldCacheIdentifierWhenDiscovered(requiresInitialization: Bool) -> Bool {
+    !requiresInitialization
+}
+
+public func shouldCacheIdentifierAfterSuccessfulWrites(requiresInitialization: Bool) -> Bool {
+    requiresInitialization
+}
+
 public func currentUnixTimestamp() -> Int64 {
     Int64(Date().timeIntervalSince1970)
 }
