@@ -401,7 +401,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             targetCharacteristicUUID: targetCharacteristicUUIDForActiveAttempt(),
             lastTimeSyncUnixSeconds: cache.lastTimeSync(for: activeCacheKey()),
             nowUnixSeconds: writePlanUnixSeconds,
-            autoTimeSync: activeTargetRequiresInitialization ? false : config.autoTimeSync
+            autoTimeSync: config.autoTimeSync
         ).map { CBUUID(string: $0) }
         startPhaseTimeout("发现特征超时") { [weak self] in
             self?.failActiveAttempt("发现特征超时")
@@ -888,13 +888,28 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             }
 
             log("初始化设备灯光序列: 红-黄-绿重复 3 次后熄灭")
-            return ledInitializationWrites().map {
+            let writePlan = try initializationWritePlan(
+                targetCharacteristicUUID: targetCharacteristicUUID,
+                lastTimeSyncUnixSeconds: cache.lastTimeSync(for: activeCacheKey()),
+                nowUnixSeconds: now,
+                sleepWindow: sleepWindow,
+                autoTimeSync: config.autoTimeSync
+            )
+            for plannedWrite in writePlan {
+                guard discoveredCharacteristicsByUUID[plannedWrite.characteristicUUID.lowercased()] != nil else {
+                    throw RuntimeError("需要写入特征，但未找到 UUID: \(plannedWrite.characteristicUUID)")
+                }
+            }
+            if writePlan.contains(where: { $0.characteristicUUID.lowercased() == normalizedTimeUUID }) {
+                log("初始化完成后同步电脑时间戳: \(now)，deep sleep: \(sleepWindow.startHour)-\(sleepWindow.endHour)")
+            }
+            return writePlan.map {
                 BLEWriteRequest(
-                    characteristicUUID: targetCharacteristicUUID,
+                    characteristicUUID: $0.characteristicUUID,
                     payload: $0.payload,
-                    purpose: "初始化指令",
-                    timeSyncUnixSeconds: nil,
-                    isRequired: true,
+                    purpose: $0.purpose,
+                    timeSyncUnixSeconds: $0.timeSyncUnixSeconds,
+                    isRequired: $0.isRequired,
                     delayAfterSeconds: $0.delayAfterSeconds
                 )
             }

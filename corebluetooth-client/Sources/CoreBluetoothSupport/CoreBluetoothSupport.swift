@@ -114,6 +114,31 @@ public struct LEDInitializationWrite: Equatable {
     }
 }
 
+public struct PlannedBLEWrite: Equatable {
+    public let characteristicUUID: String
+    public let payload: Data
+    public let purpose: String
+    public let timeSyncUnixSeconds: Int64?
+    public let isRequired: Bool
+    public let delayAfterSeconds: Double?
+
+    public init(
+        characteristicUUID: String,
+        payload: Data,
+        purpose: String,
+        timeSyncUnixSeconds: Int64?,
+        isRequired: Bool,
+        delayAfterSeconds: Double? = nil
+    ) {
+        self.characteristicUUID = characteristicUUID
+        self.payload = payload
+        self.purpose = purpose
+        self.timeSyncUnixSeconds = timeSyncUnixSeconds
+        self.isRequired = isRequired
+        self.delayAfterSeconds = delayAfterSeconds
+    }
+}
+
 public func ledInitializationWrites(
     delaySeconds: Double = BLEDefaults.initializationDelaySeconds
 ) -> [LEDInitializationWrite] {
@@ -134,6 +159,46 @@ public func ledInitializationWrites(
     } + [
         LEDInitializationWrite(payload: Data([0x00]), delayAfterSeconds: nil),
     ]
+}
+
+public func initializationWritePlan(
+    targetCharacteristicUUID: String,
+    lastTimeSyncUnixSeconds: Int64?,
+    nowUnixSeconds: Int64,
+    sleepWindow: SleepWindow,
+    autoTimeSync: Bool = true,
+    delaySeconds: Double = BLEDefaults.initializationDelaySeconds
+) throws -> [PlannedBLEWrite] {
+    var writes = ledInitializationWrites(delaySeconds: delaySeconds).map {
+        PlannedBLEWrite(
+            characteristicUUID: targetCharacteristicUUID,
+            payload: $0.payload,
+            purpose: "初始化指令",
+            timeSyncUnixSeconds: nil,
+            isRequired: true,
+            delayAfterSeconds: $0.delayAfterSeconds
+        )
+    }
+
+    let normalizedTargetUUID = targetCharacteristicUUID.lowercased()
+    let normalizedTimeUUID = BLEDefaults.timeCharacteristicUUID.lowercased()
+    guard normalizedTargetUUID != normalizedTimeUUID,
+          autoTimeSync,
+          needsTimeSync(
+              lastSyncUnixSeconds: lastTimeSyncUnixSeconds,
+              nowUnixSeconds: nowUnixSeconds
+          ) else {
+        return writes
+    }
+
+    writes.append(PlannedBLEWrite(
+        characteristicUUID: BLEDefaults.timeCharacteristicUUID,
+        payload: try buildTimeSyncPayload(unixTimeSeconds: nowUnixSeconds, sleepWindow: sleepWindow),
+        purpose: "同步时间",
+        timeSyncUnixSeconds: nowUnixSeconds,
+        isRequired: false
+    ))
+    return writes
 }
 
 public func shouldInitializeNamedDevice(

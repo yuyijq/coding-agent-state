@@ -73,6 +73,39 @@ final class CoreBluetoothSupportTests: XCTestCase {
         XCTAssertTrue(shouldCacheIdentifierAfterSuccessfulWrites(requiresInitialization: true))
     }
 
+    func testInitializationWritePlanAppendsAutomaticTimeSyncWhenMissing() throws {
+        let writes = try initializationWritePlan(
+            targetCharacteristicUUID: BLEDefaults.ledCharacteristicUUID,
+            lastTimeSyncUnixSeconds: nil,
+            nowUnixSeconds: 13_600,
+            sleepWindow: SleepWindow(startHour: 23, endHour: 9)
+        )
+
+        XCTAssertEqual(writes.count, 11)
+        XCTAssertEqual(writes.dropLast().map(\.characteristicUUID), Array(repeating: BLEDefaults.ledCharacteristicUUID, count: 10))
+        XCTAssertEqual(writes.last?.characteristicUUID, BLEDefaults.timeCharacteristicUUID)
+        XCTAssertEqual(writes.last?.payload, try buildTimeSyncPayload(
+            unixTimeSeconds: 13_600,
+            sleepWindow: SleepWindow(startHour: 23, endHour: 9)
+        ))
+        XCTAssertEqual(writes.last?.purpose, "同步时间")
+        XCTAssertEqual(writes.last?.timeSyncUnixSeconds, 13_600)
+        XCTAssertFalse(writes.last?.isRequired ?? true)
+    }
+
+    func testInitializationWritePlanSkipsAutomaticTimeSyncWhenDisabled() throws {
+        let writes = try initializationWritePlan(
+            targetCharacteristicUUID: BLEDefaults.ledCharacteristicUUID,
+            lastTimeSyncUnixSeconds: nil,
+            nowUnixSeconds: 13_600,
+            sleepWindow: SleepWindow(startHour: 23, endHour: 9),
+            autoTimeSync: false
+        )
+
+        XCTAssertEqual(writes.count, 10)
+        XCTAssertEqual(writes.map(\.characteristicUUID), Array(repeating: BLEDefaults.ledCharacteristicUUID, count: 10))
+    }
+
     func testCharacteristicUUIDsToDiscoverUsesFixedWritableSetWhenListing() {
         XCTAssertEqual(characteristicUUIDsToDiscover(
             targetCharacteristicUUID: nil,
