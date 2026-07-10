@@ -15,7 +15,7 @@
 
 ## 运行
 
-构建后可以直接执行当前目录里的 release CLI。默认使用用户目录下的 `~/.ble_device_cache.json`。不指定 `--name` 时，会遍历缓存里所有可连接设备：
+构建后可以直接执行当前目录里的 release CLI。默认使用 `~/.ks-server-dev/.mina_led`。不指定 `--name` 时，会遍历缓存里所有可连接设备：
 
 ```bash
 ./esp32-ble-corebluetooth

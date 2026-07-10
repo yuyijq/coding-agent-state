@@ -10,7 +10,7 @@ public enum BLEDefaults {
         ledCharacteristicUUID,
         timeCharacteristicUUID,
     ]
-    public static let cachePath = "~/.ble_device_cache.json"
+    public static let cachePath = "~/.ks-server-dev/.mina_led"
     public static let connectRetries = 3
     public static let clientTimeout = 3.0
     public static let retryDelay = 0.5
@@ -357,6 +357,10 @@ public struct DeviceCache: Codable, Equatable {
     public func save(to path: String) throws {
         let url = URL(fileURLWithPath: expandedPath(path))
         let data = try JSONEncoder.bleCacheEncoder.encode(self)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         try data.write(to: url, options: .atomic)
     }
 }

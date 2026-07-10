@@ -20,6 +20,11 @@ def load_client_module():
 
 
 class Esp32BleClientTests(unittest.TestCase):
+    def test_default_cache_path_uses_ks_server_dev_mina_led(self):
+        module = load_client_module()
+
+        self.assertEqual(module.DEFAULT_CACHE_PATH, Path.home() / ".ks-server-dev" / ".mina_led")
+
     def test_find_device_by_name_uses_substring_match(self):
         module = load_client_module()
         devices = [

@@ -126,7 +126,7 @@ final class CoreBluetoothSupportTests: XCTestCase {
     }
 
     func testDefaultCachePathLivesInHomeDirectory() {
-        XCTAssertEqual(BLEDefaults.cachePath, "~/.ble_device_cache.json")
+        XCTAssertEqual(BLEDefaults.cachePath, "~/.ks-server-dev/.mina_led")
     }
 
     func testDefaultRetryDelayIsHalfASecond() {
@@ -136,8 +136,8 @@ final class CoreBluetoothSupportTests: XCTestCase {
     func testCachePathExpandsHomeDirectory() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         XCTAssertEqual(
-            expandedPath("~/.ble_device_cache.json"),
-            "\(home)/.ble_device_cache.json"
+            expandedPath("~/.ks-server-dev/.mina_led"),
+            "\(home)/.ks-server-dev/.mina_led"
         )
     }
 
@@ -170,6 +170,27 @@ final class CoreBluetoothSupportTests: XCTestCase {
         XCTAssertEqual(decoded.entries["Mina"]?.name, "Mina-15")
         XCTAssertEqual(decoded.lastTimeSync(for: "Mina"), 1_788_000_000)
         XCTAssertEqual(decoded.sleepWindow(for: "Mina"), try SleepWindow(startHour: 23, endHour: 7))
+    }
+
+    func testCacheSaveCreatesParentDirectory() throws {
+        let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        defer {
+            try? FileManager.default.removeItem(at: tempRoot)
+        }
+
+        let cachePath = tempRoot
+            .appendingPathComponent(".ks-server-dev")
+            .appendingPathComponent(".mina_led")
+            .path
+        let cache = DeviceCache(entries: [
+            "Mina": DeviceCacheEntry(identifier: "550E8400-E29B-41D4-A716-446655440000"),
+        ])
+
+        try cache.save(to: cachePath)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cachePath))
+        XCTAssertEqual(DeviceCache.load(from: cachePath), cache)
     }
 
     func testCacheSleepWindowFallsBackToDefaultWhenMissingOrInvalid() throws {

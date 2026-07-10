@@ -17,7 +17,7 @@ DEFAULT_NAME = "Mina-15"
 DEFAULT_DATA = "0"
 DEFAULT_CHAR_UUID = "00001525-1212-efde-1523-785feabcd123"
 DEFAULT_TIME_CHAR_UUID = "01001525-1212-efde-1523-785feabcd123"
-DEFAULT_CACHE_PATH = Path(__file__).with_name(".ble_device_cache.json")
+DEFAULT_CACHE_PATH = Path.home() / ".ks-server-dev" / ".mina_led"
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_CLIENT_TIMEOUT = 3.0
 DEFAULT_RETRY_DELAY = 1.2
@@ -89,6 +89,7 @@ def load_device_cache(cache_path=DEFAULT_CACHE_PATH):
 
 def save_device_cache(cache, cache_path=DEFAULT_CACHE_PATH):
     cache_path = Path(cache_path)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(
         json.dumps(cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

@@ -104,6 +104,15 @@ class BleScanHelperTests(unittest.TestCase):
 
             self.assertEqual(json.loads(cache_path.read_text(encoding="utf-8")), cache)
 
+    def test_save_device_cache_creates_parent_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / ".ks-server-dev" / ".mina_led"
+            cache = {"Mina": {"address": "11:22", "name": "Mina-8"}}
+
+            esp32_ble_client.save_device_cache(cache, cache_path)
+
+            self.assertEqual(json.loads(cache_path.read_text(encoding="utf-8")), cache)
+
 
 class BleSendRetryTests(unittest.IsolatedAsyncioTestCase):
     async def test_write_ble_data_uses_three_second_client_timeout(self):
