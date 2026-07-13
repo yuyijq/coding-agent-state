@@ -33,6 +33,6 @@
 
 /* Defines */
 #define TAG "Mina"
-#define DEVICE_NAME "Mina-16"
+#define DEVICE_NAME "Mina-20"
 
 #endif // COMMON_H
