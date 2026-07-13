@@ -54,7 +54,7 @@ static int start_advertising(void) {
     adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(1000);
     adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(1020);
 
-    rc = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_N6);
+    rc = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_N3);
     if (rc != ESP_OK) {
         ESP_LOGW(TAG, "failed to set advertising tx power, error code: %d", rc);
     }
@@ -111,7 +111,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg) {
         if (event->connect.status == 0) {
             rc = esp_ble_tx_power_set_enhanced(ESP_BLE_ENHANCED_PWR_TYPE_CONN,
                                                event->connect.conn_handle,
-                                               ESP_PWR_LVL_N6);
+                                               ESP_PWR_LVL_N3);
             if (rc != ESP_OK) {
                 ESP_LOGD(TAG, "failed to set connection tx power, error code: %d",
                          rc);
