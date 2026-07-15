@@ -12,7 +12,8 @@ Remove the three `gpio_sleep_sel_dis()` calls for GPIO 7, GPIO 8, and GPIO 9
 from `led_init()`. Do not add an LED timer, FreeRTOS task, delay loop, PWM
 peripheral, or new dependency.
 
-The existing power-management configuration remains authoritative:
+The tracked `sdkconfig.defaults` power-management configuration remains
+authoritative:
 
 - `CONFIG_PM_ENABLE=y`
 - `CONFIG_PM_SLP_DISABLE_GPIO=y`
@@ -53,8 +54,8 @@ remain and passes only when:
 
 - `led.c` no longer calls `gpio_sleep_sel_dis()`;
 - `led.c` contains no timer, task, or delay-based blinking implementation;
-- the project still enables automatic Light Sleep, Tickless Idle, and GPIO
-  disabling during Light Sleep.
+- tracked project defaults still enable automatic Light Sleep, Tickless Idle,
+  and GPIO disabling during Light Sleep.
 
 Run that regression test, the existing Python regression tests, the ESP-IDF
 firmware build, and `git diff --check`. Update the README to state that visible
@@ -65,6 +66,7 @@ LED output can flicker according to system wake activity.
 Expected implementation files:
 
 - `main/src/led.c`
+- `sdkconfig.defaults`
 - `tests/test_led_light_sleep_flicker.py`
 - `README.md`
 

@@ -4,19 +4,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LED_C = ROOT / "main" / "src" / "led.c"
 MAIN_C = ROOT / "main" / "main.c"
-SDKCONFIG = ROOT / "sdkconfig"
+SDKCONFIG_DEFAULTS = ROOT / "sdkconfig.defaults"
 
 
 def test_led_gpios_follow_the_configured_light_sleep_policy():
     led_source = LED_C.read_text()
     main_source = MAIN_C.read_text()
-    sdkconfig = SDKCONFIG.read_text()
+    sdkconfig_defaults = SDKCONFIG_DEFAULTS.read_text()
 
     assert "gpio_sleep_sel_dis" not in led_source
     assert ".light_sleep_enable = true" in main_source
-    assert "CONFIG_PM_ENABLE=y" in sdkconfig
-    assert "CONFIG_PM_SLP_DISABLE_GPIO=y" in sdkconfig
-    assert "CONFIG_FREERTOS_USE_TICKLESS_IDLE=y" in sdkconfig
+    assert "CONFIG_PM_ENABLE=y" in sdkconfig_defaults
+    assert "CONFIG_PM_SLP_DISABLE_GPIO=y" in sdkconfig_defaults
+    assert "CONFIG_FREERTOS_USE_TICKLESS_IDLE=y" in sdkconfig_defaults
 
 
 def test_led_flicker_adds_no_periodic_wakeup_mechanism():
@@ -24,9 +24,14 @@ def test_led_flicker_adds_no_periodic_wakeup_mechanism():
 
     forbidden_wakeup_code = (
         "esp_timer_",
+        "xTimerCreate",
         "vTaskDelay(",
+        "vTaskDelayUntil(",
         "xTaskCreate(",
+        "xTaskCreateStatic(",
         "ledc_",
+        "gptimer_",
+        "rmt_",
     )
     for forbidden in forbidden_wakeup_code:
         assert forbidden not in led_source
