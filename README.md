@@ -66,7 +66,7 @@ To exit the serial monitor, type `Ctrl-]`.
 - `main/main.c`: initializes LED, NVS, NimBLE, GAP, GATT, then starts the NimBLE host task.
 - `main/src/gap.c`: configures the BLE device name, advertising data, connection handling, and advertising restart after disconnect.
 - `main/src/gatt_svc.c`: registers the Automation IO service and handles LED characteristic writes.
-- `main/src/led.c`: controls the red, yellow, and green LEDs through hard-coded GPIO outputs.
+- `main/src/led.c`: controls the red, yellow, and green LEDs through hard-coded GPIO outputs; automatic Light Sleep may temporarily disable those GPIOs, producing irregular wake-driven flicker without a periodic LED timer.
 
 ## LED Pins
 
@@ -77,3 +77,5 @@ Red: GPIO 7
 Yellow: GPIO 8
 Green: GPIO 9
 ```
+
+The selected color remains the logical LED state until another BLE command arrives. To minimize standby power, GPIO 7, GPIO 8, and GPIO 9 are allowed to follow the configured automatic Light Sleep policy, so the physical LED can flicker as BLE or other system activity wakes the chip. The flicker rate is intentionally not regular or color-specific.

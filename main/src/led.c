@@ -55,9 +55,5 @@ void led_init(void) {
     gpio_set_direction(YELLOW_LED_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_direction(GREEN_LED_GPIO, GPIO_MODE_OUTPUT);
 
-    ESP_ERROR_CHECK(gpio_sleep_sel_dis(RED_LED_GPIO));
-    ESP_ERROR_CHECK(gpio_sleep_sel_dis(YELLOW_LED_GPIO));
-    ESP_ERROR_CHECK(gpio_sleep_sel_dis(GREEN_LED_GPIO));
-
     led_apply_command(LED_CMD_OFF);
 }
