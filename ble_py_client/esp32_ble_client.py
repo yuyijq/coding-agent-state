@@ -71,7 +71,7 @@ def remember_seen_device(seen_devices, device, advertisement_data=None):
 def find_device_by_name(devices, device_name):
     for device, advertisement_data in iter_seen_devices(devices):
         name = device_display_name(device, advertisement_data)
-        if name and device_name in name:
+        if name == device_name:
             return device
     return None
 
@@ -340,7 +340,7 @@ async def send_ble_data(
         if attempts > 1:
             log(f"扫描/连接尝试 {attempt}/{attempts}")
 
-        log(f"正在扫描 BLE 设备，寻找名称包含 '{device_name}' 的设备...")
+        log(f"正在扫描 BLE 设备，寻找名称精确等于 '{device_name}' 的设备...")
         try:
             target_device, devices = await scan_for_device_by_name(
                 device_name,
@@ -362,7 +362,7 @@ async def send_ble_data(
                 await asyncio.sleep(retry_delay)
                 continue
 
-            log(f"未找到名称包含 '{device_name}' 的设备。当前扫描到：")
+            log(f"未找到名称精确等于 '{device_name}' 的设备。当前扫描到：")
             list_devices(last_devices)
             return 1
 
@@ -393,7 +393,7 @@ async def send_ble_data(
 
 def build_parser():
     parser = argparse.ArgumentParser(description="向 ESP32 BLE 可写特征发送数据")
-    parser.add_argument("--name", default=DEFAULT_NAME, help=f"设备名包含匹配，默认 {DEFAULT_NAME}")
+    parser.add_argument("--name", default=DEFAULT_NAME, help=f"设备名精确匹配，默认 {DEFAULT_NAME}")
     parser.add_argument("--data", default=DEFAULT_DATA, help="发送内容。0/1/2 会按单字节发送；也支持 0x00 或普通字符串")
     parser.add_argument("--uuid", default=None, help="目标特征 UUID；传空字符串则只列出可写特征")
     parser.add_argument("--scan-timeout", type=float, default=12.0, help="扫描秒数，默认 12")

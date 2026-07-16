@@ -2,6 +2,12 @@ import XCTest
 @testable import CoreBluetoothSupport
 
 final class CoreBluetoothSupportTests: XCTestCase {
+    func testDeviceNameMatchingRequiresExactEquality() {
+        XCTAssertTrue(deviceNameMatches("Mina-1", targetName: "Mina-1"))
+        XCTAssertFalse(deviceNameMatches("Mina-19", targetName: "Mina-1"))
+        XCTAssertFalse(deviceNameMatches("mina-1", targetName: "Mina-1"))
+    }
+
     func testParsePayloadMatchesPythonRules() throws {
         XCTAssertEqual(try parsePayload("0"), Data([0x00]))
         XCTAssertEqual(try parsePayload("3"), Data([0x03]))

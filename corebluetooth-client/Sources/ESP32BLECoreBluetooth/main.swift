@@ -647,7 +647,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             if peripheral.identifier.uuidString == cachedIdentifier {
                 return true
             }
-            if let name = peripheral.name, name.contains(targetName) {
+            if let name = peripheral.name, deviceNameMatches(name, targetName: targetName) {
                 return true
             }
             return false
@@ -750,7 +750,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
 
         scanRound += 1
         let roundTimeout = min(max(1.0, config.scanTimeout / Double(config.scanRounds)), remaining)
-        log("正在扫描广播服务 \(config.serviceUUID) 且名称包含 '\(activeDisplayTargetName())' 的设备... 第 \(scanRound)/\(config.scanRounds) 轮")
+        log("正在扫描广播服务 \(config.serviceUUID) 且名称精确等于 '\(activeDisplayTargetName())' 的设备... 第 \(scanRound)/\(config.scanRounds) 轮")
 
         central.scanForPeripherals(
             withServices: [CBUUID(string: config.serviceUUID)],
@@ -805,7 +805,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
             return
         }
 
-        log("未找到名称包含 '\(activeDisplayTargetName())' 的设备。当前扫描到：")
+        log("未找到名称精确等于 '\(activeDisplayTargetName())' 的设备。当前扫描到：")
         listSeenDevices()
         finishActiveTargetWithFailure("未找到目标设备")
     }
@@ -1185,7 +1185,7 @@ private final class BLEClientRunner: NSObject, @preconcurrency CBCentralManagerD
         guard let name = displayName(peripheral, advertisementData: advertisementData) else {
             return false
         }
-        return name.contains(activeDisplayTargetName())
+        return deviceNameMatches(name, targetName: activeDisplayTargetName())
     }
 
     private func displayName(_ peripheral: CBPeripheral, advertisementData: [String: Any]) -> String? {

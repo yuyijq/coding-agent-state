@@ -58,7 +58,7 @@ class BleScanHelperTests(unittest.TestCase):
         target = make_device(name=None, address="11:22")
         seen = [(target, make_adv(local_name="Mina-8"))]
 
-        self.assertIs(esp32_ble_client.find_device_by_name(seen, "Mina"), target)
+        self.assertIs(esp32_ble_client.find_device_by_name(seen, "Mina-8"), target)
 
     def test_remember_seen_device_updates_advertisement_data_for_same_address(self):
         seen = {}

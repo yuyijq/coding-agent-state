@@ -25,15 +25,16 @@ class Esp32BleClientTests(unittest.TestCase):
 
         self.assertEqual(module.DEFAULT_CACHE_PATH, Path.home() / ".ks-server-dev" / ".mina_led")
 
-    def test_find_device_by_name_uses_substring_match(self):
+    def test_find_device_by_name_requires_exact_match(self):
         module = load_client_module()
-        devices = [
-            SimpleNamespace(name=None),
-            SimpleNamespace(name="Other"),
-            SimpleNamespace(name="Mina-15"),
-        ]
+        exact_device = SimpleNamespace(name="Mina-1")
+        similarly_named_device = SimpleNamespace(name="Mina-19")
 
-        self.assertIs(devices[2], module.find_device_by_name(devices, "Mina"))
+        self.assertIs(
+            exact_device,
+            module.find_device_by_name([similarly_named_device, exact_device], "Mina-1"),
+        )
+        self.assertIsNone(module.find_device_by_name([similarly_named_device], "Mina-1"))
 
     def test_find_device_by_name_returns_none_when_missing(self):
         module = load_client_module()

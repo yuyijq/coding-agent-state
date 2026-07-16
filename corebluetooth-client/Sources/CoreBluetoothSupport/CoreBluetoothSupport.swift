@@ -22,6 +22,10 @@ public enum BLEDefaults {
     public static let initializationDelaySeconds = 0.05
 }
 
+public func deviceNameMatches(_ candidateName: String, targetName: String) -> Bool {
+    candidateName == targetName
+}
+
 public enum PayloadError: Error, CustomStringConvertible {
     case invalidHexByte(String)
     case byteOutOfRange(String)
